@@ -569,7 +569,10 @@ void WifiManagerSetup() {
   strcpy(query_period, preferences.getString("query_period", query_period).c_str());
   strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   
-  WiFiManagerParameter custom_input_type("type", "\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
+  const char* custom_type_str = "<br/><label for='customfieldid'>Custom Field Label</label><input type='radio' name='customfieldid' value='MQTT' checked>MQTT<br><input type='radio' name='customfieldid' value='HTTP'>generic HTTP<br><input type='radio' name='customfieldid' value='SMA'> SMA Energy Meter or Home Manager<br><input type='radio' name='customfieldid' value='SHRDZM'> SHRDZM interface";
+  WiFiManagerParameter custom_input_type(custom_type_str); // custom html input
+  
+  //WiFiManagerParameter custom_input_type("type", "\"MQTT\" for MQTT, \"HTTP\" for generic HTTP, \"SMA\" for SMA EM/HM Multicast or \"SHRDZM\" for SHRDZM UDP data", input_type, 40);
   WiFiManagerParameter custom_mqtt_server("server", "MQTT Server IP or query url for generic HTTP", mqtt_server, 80);
   WiFiManagerParameter custom_mqtt_port("port", "MQTT Port", mqtt_port, 6);
   WiFiManagerParameter custom_mqtt_topic("topic", "MQTT Topic", mqtt_topic, 60);
@@ -589,6 +592,7 @@ void WifiManagerSetup() {
   wifiManager.setSaveConfigCallback(saveConfigCallback);
 
   //add all your parameters here
+  
   wifiManager.addParameter(&custom_input_type);
   wifiManager.addParameter(&custom_mqtt_server);
   wifiManager.addParameter(&custom_mqtt_port);
