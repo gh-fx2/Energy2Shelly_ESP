@@ -909,7 +909,7 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tshelly_port : " + String(shelly_port));
   DEBUG_SERIAL.println("\tforce_pwr_decimals : " + String(force_pwr_decimals));
   DEBUG_SERIAL.println("\tsma_id : " + String(sma_id));
-  DEBUG_SERIAL.println("\tum_accu : " + String(num_accu));
+  DEBUG_SERIAL.println("\tnum_accu : " + String(num_accu));
   DEBUG_SERIAL.println("\tshift_power : " + String(shift_power));
 
   if (strcmp(input_type, "SMA") == 0) {
