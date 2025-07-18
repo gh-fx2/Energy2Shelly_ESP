@@ -69,6 +69,10 @@ bool led_i = false;
 const uint8_t ledblinkduration = 50;
 char led_gpio[3] = "";
 char led_gpio_i[6];
+char num_accu[6] = "1";
+int numAccu = 1;
+char shift_power[10] = "";
+int shiftPower = 0;
 
 unsigned long period = 1000;
 int rpcId = 1;
@@ -154,6 +158,9 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
 }
 
 void setPowerData(double totalPower) {
+  totalPower += shiftPower;
+  if ( numAccu > 0 )
+    totalPower /= numAccu;
   for (int i = 0; i <= 2; i++) {
     PhasePower[i].power = round2(totalPower * 0.3333);
     PhasePower[i].voltage = defaultVoltage;
@@ -167,6 +174,13 @@ void setPowerData(double totalPower) {
 }
 
 void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
+  phase1Power += shiftPower;
+  if ( numAccu > 0 )
+  {
+    phase1Power /= numAccu;
+    phase2Power /= numAccu;
+    phase3Power /= numAccu;
+  }
   PhasePower[0].power = round2(phase1Power);
   PhasePower[1].power = round2(phase2Power);
   PhasePower[2].power = round2(phase3Power);
@@ -771,6 +785,8 @@ void WifiManagerSetup() {
   strcpy(shelly_port, preferences.getString("shelly_port", shelly_port).c_str());
   strcpy(force_pwr_decimals, preferences.getString("force_pwr_decimals", force_pwr_decimals).c_str());
   strcpy(sma_id, preferences.getString("sma_id", sma_id).c_str());
+  strcpy(num_accu, preferences.getString("num_accu", num_accu).c_str());
+  strcpy(shift_power, preferences.getString("shift_power", shift_power).c_str());
   
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
   WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data", input_type, 40);
@@ -797,6 +813,9 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_power_l3_path("power_l3_path", "<b>Phase 3 power JSON path</b><br>Phase 3 power JSON path<br>optional", power_l3_path, 60);
   WiFiManagerParameter custom_energy_in_path("energy_in_path", "<b>Energy from grid JSON path</b><br>e.g. <code>ENERGY.Grid</code>", energy_in_path, 60);
   WiFiManagerParameter custom_energy_out_path("energy_out_path", "<b>Energy to grid JSON path</b><br>e.g. <code>ENERGY.FeedIn</code>", energy_out_path, 60);
+  WiFiManagerParameter custom_section5("<hr><h3>Battery MOD</h3>");
+  WiFiManagerParameter custom_num_accu("num_accu", "<b>Split Power between more solar batteries</b><br>optional, e.g. <code>2</code>", num_accu, 6);
+  WiFiManagerParameter custom_shift_power("shift_power", "<b>emulate higher consumption of power in W</b><br>optional, e.g. <code>5</code>", shift_power, 10);
 
   WiFiManager wifiManager;
   if (!DEBUG) {
@@ -831,6 +850,8 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_power_l3_path);
   wifiManager.addParameter(&custom_energy_in_path);
   wifiManager.addParameter(&custom_energy_out_path);
+  wifiManager.addParameter(&custom_num_accu);
+  wifiManager.addParameter(&custom_shift_power);
   
 
   if (!wifiManager.autoConnect("Energy2Shelly")) {
@@ -863,6 +884,8 @@ void WifiManagerSetup() {
   strcpy(shelly_port, custom_shelly_port.getValue());
   strcpy(force_pwr_decimals, custom_force_pwr_decimals.getValue());
   strcpy(sma_id, custom_sma_id.getValue());
+  strcpy(num_accu, custom_num_accu.getValue());
+  strcpy(shift_power, custom_shift_power.getValue());
 
   DEBUG_SERIAL.println("The values in the preferences are: ");
   DEBUG_SERIAL.println("\tinput_type : " + String(input_type));
@@ -886,6 +909,8 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tshelly_port : " + String(shelly_port));
   DEBUG_SERIAL.println("\tforce_pwr_decimals : " + String(force_pwr_decimals));
   DEBUG_SERIAL.println("\tsma_id : " + String(sma_id));
+  DEBUG_SERIAL.println("\tum_accu : " + String(num_accu));
+  DEBUG_SERIAL.println("\tshift_power : " + String(shift_power));
 
   if (strcmp(input_type, "SMA") == 0) {
     dataSMA = true;
@@ -940,6 +965,8 @@ void WifiManagerSetup() {
     preferences.putString("shelly_port", shelly_port);
     preferences.putString("force_pwr_decimals", force_pwr_decimals);
     preferences.putString("sma_id", sma_id);
+    preferences.putString("num_accu", num_accu);
+    preferences.putString("shift_power", shift_power);
     wifiManager.reboot();
   }
   DEBUG_SERIAL.println("local ip");
@@ -953,6 +980,12 @@ void setup(void) {
   if (String(led_gpio).toInt() > 0) {
     led = String(led_gpio).toInt();
   }
+
+  if (String(num_accu).toInt() > 0) {
+    numAccu = String(num_accu).toInt();
+  }
+  
+  shiftPower = String(shift_power).toInt();
 
   if (led > 0) {
     pinMode(led, OUTPUT);
