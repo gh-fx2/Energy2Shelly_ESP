@@ -287,8 +287,11 @@ void GetDeviceInfo() {
   blinkled(ledblinkduration);
 }
 
+static uint32_t last_read_milli = 0;
+
 void EMGetStatus() {
   JsonDocument jsonResponse;
+  last_read_milli = millis();
   jsonResponse["id"] = 0;
   jsonResponse["a_current"] = PhasePower[0].current;
   jsonResponse["a_voltage"] = PhasePower[0].voltage;
@@ -475,7 +478,7 @@ void parseSMA() {
         offset += 2;
         // uint16_t susyID = (offset[0] << 8) + offset[1];
         offset += 2;
-        uint32_t serial = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
+        long int serial = (offset[0] << 24) + (offset[1] << 16) + (offset[2] << 8) + offset[3];
         DEBUG_SERIAL.print("Received SMA multicast from ");
         DEBUG_SERIAL.println(serial);
         if ((strcmp(sma_id, "") != 0) && (String(sma_id).toInt() != serial)) {
@@ -1131,4 +1134,13 @@ void loop() {
     }
   }
   handleblinkled();
+
+  if ( last_read_milli )
+  {
+    if ( millis() - last_read_milli > 60000 )
+    {
+      ESP.restart();
+      delay(20);
+    }
+  }
 }
