@@ -153,7 +153,11 @@ JsonVariant resolveJsonPath(JsonVariant variant, const char *path) {
   return variant[path];
 }
 
+static uint32_t last_read_milli = 0;
+static uint32_t last_hichi_milli = 0;
+
 void setPowerData(double totalPower) {
+  last_hichi_milli = millis();
   for (int i = 0; i <= 2; i++) {
     PhasePower[i].power = round2(totalPower * 0.3333);
     PhasePower[i].voltage = defaultVoltage;
@@ -167,6 +171,7 @@ void setPowerData(double totalPower) {
 }
 
 void setPowerData(double phase1Power, double phase2Power, double phase3Power) {
+  last_hichi_milli = millis();
   PhasePower[0].power = round2(phase1Power);
   PhasePower[1].power = round2(phase2Power);
   PhasePower[2].power = round2(phase3Power);
@@ -246,7 +251,7 @@ void rpcWrapper() {
 }
 
 void blinkled(int duration) {
-  if (led > 0) {
+  if ((led > 0) && !ledOffTime) {
     if (led_i) {
       digitalWrite(led, HIGH);
     } else {
@@ -284,10 +289,8 @@ void GetDeviceInfo() {
   jsonResponse["profile"] = "triphase";
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(ledblinkduration);
+//  blinkled(ledblinkduration);
 }
-
-static uint32_t last_read_milli = 0;
 
 void EMGetStatus() {
   JsonDocument jsonResponse;
@@ -316,7 +319,7 @@ void EMGetStatus() {
   jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(ledblinkduration);
+//  blinkled(ledblinkduration);
 }
 
 void EMDataGetStatus() {
@@ -332,7 +335,7 @@ void EMDataGetStatus() {
   jsonResponse["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(ledblinkduration);
+//  blinkled(ledblinkduration);
 }
 
 void EMGetConfig() {
@@ -345,7 +348,7 @@ void EMGetConfig() {
   jsonResponse["ct_type"] = "120A";
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-  blinkled(ledblinkduration);
+//  blinkled(ledblinkduration);
 }
 
 void webSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -980,6 +983,12 @@ void setup(void) {
     request->send(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
   });
 
+  server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request) {
+    ESP.restart();
+    delay(20);
+  });
+
+
   server.on("/rpc/EM.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
@@ -1133,8 +1142,17 @@ void loop() {
       startMillis = currentMillis;
     }
   }
-  handleblinkled();
-
+  
+  if( last_hichi_milli )
+  {
+    if ( millis() - last_hichi_milli > 5000 )
+       blinkled(ledblinkduration);
+    if ( millis() - last_hichi_milli > 10000 )
+    {
+      ESP.restart();
+      delay(20);
+    }
+  }
   if ( last_read_milli )
   {
     if ( millis() - last_read_milli > 60000 )
@@ -1143,4 +1161,5 @@ void loop() {
       delay(20);
     }
   }
+  handleblinkled();
 }
