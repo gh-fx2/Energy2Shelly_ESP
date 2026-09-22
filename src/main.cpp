@@ -969,47 +969,47 @@ void setup(void) {
     }
   }
 
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     request->send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
   });
 
-  server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/status", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
   });
 
-  server.on("/reset", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/reset", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     shouldResetConfig = true;
     request->send(200, "text/plain", "Resetting WiFi configuration, please log back into the hotspot to reconfigure...\r\n");
   });
 
-  server.on("/reboot", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/reboot", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     ESP.restart();
     delay(20);
   });
 
 
-  server.on("/rpc/EM.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/rpc/EM.GetStatus", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetStatus();
     request->send(200, "application/json", serJsonResponse);
   });
 
-  server.on("/rpc/EMData.GetStatus", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/rpc/EMData.GetStatus", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     EMDataGetStatus();
     request->send(200, "application/json", serJsonResponse);
   });
 
-  server.on("/rpc/EM.GetConfig", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/rpc/EM.GetConfig", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     EMGetConfig();
     request->send(200, "application/json", serJsonResponse);
   });
 
-  server.on("/rpc/Shelly.GetDeviceInfo", HTTP_GET, [](AsyncWebServerRequest *request) {
+  server.on("/rpc/Shelly.GetDeviceInfo", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     request->send(200, "application/json", serJsonResponse);
   });
 
-  server.on("/rpc", HTTP_POST, [](AsyncWebServerRequest *request) {
+  server.on("/rpc", AsyncWebRequestMethod::HTTP_POST, [](AsyncWebServerRequest *request) {
     GetDeviceInfo();
     rpcWrapper();
     request->send(200, "application/json", serJsonResponse);
