@@ -21,6 +21,7 @@
 #include <ESPAsyncWebServer.h>
 #include <WiFiUdp.h>
 #include <ModbusIP_ESP8266.h>
+#include "winter_charge_mode.h"
 
 #define DEBUG true // set to false for no DEBUG output
 #define DEBUG_SERIAL if(DEBUG)Serial
@@ -34,6 +35,8 @@ char input_type[40];
 char mqtt_server[80];
 char mqtt_port[6] = "1883";
 char mqtt_topic[60] = "tele/meter/SENSOR";
+char soc_topic[60] = "";
+char soc_path[60] = "";
 char mqtt_user[40] = "";
 char mqtt_passwd[40] = "";
 char power_path[60] = "";
@@ -107,6 +110,7 @@ struct EnergyData {
 
 PowerData PhasePower[3];
 EnergyData PhaseEnergy[3];
+WinterChargeMode winterChargeMode;
 String serJsonResponse;
 
 #ifndef ESP32
@@ -295,28 +299,33 @@ void GetDeviceInfo() {
 void EMGetStatus() {
   JsonDocument jsonResponse;
   last_read_milli = millis();
+  bool simulateZeroPower = winterChargeMode.shouldSimulateZeroPower();
+  double phasePower[3];
+  for (int i = 0; i < 3; i++) {
+    phasePower[i] = simulateZeroPower ? 0 : PhasePower[i].power;
+  }
   jsonResponse["id"] = 0;
-  jsonResponse["a_current"] = PhasePower[0].current;
+  jsonResponse["a_current"] = simulateZeroPower ? 0 : PhasePower[0].current;
   jsonResponse["a_voltage"] = PhasePower[0].voltage;
-  jsonResponse["a_act_power"] = PhasePower[0].power;
-  jsonResponse["a_aprt_power"] = PhasePower[0].apparentPower;
+  jsonResponse["a_act_power"] = phasePower[0];
+  jsonResponse["a_aprt_power"] = simulateZeroPower ? 0 : PhasePower[0].apparentPower;
   jsonResponse["a_pf"] = PhasePower[0].powerFactor;
   jsonResponse["a_freq"] = PhasePower[0].frequency;
-  jsonResponse["b_current"] = PhasePower[1].current;
+  jsonResponse["b_current"] = simulateZeroPower ? 0 : PhasePower[1].current;
   jsonResponse["b_voltage"] = PhasePower[1].voltage;
-  jsonResponse["b_act_power"] = PhasePower[1].power;
-  jsonResponse["b_aprt_power"] = PhasePower[1].apparentPower;
+  jsonResponse["b_act_power"] = phasePower[1];
+  jsonResponse["b_aprt_power"] = simulateZeroPower ? 0 : PhasePower[1].apparentPower;
   jsonResponse["b_pf"] = PhasePower[1].powerFactor;
   jsonResponse["b_freq"] = PhasePower[1].frequency;
-  jsonResponse["c_current"] = PhasePower[2].current;
+  jsonResponse["c_current"] = simulateZeroPower ? 0 : PhasePower[2].current;
   jsonResponse["c_voltage"] = PhasePower[2].voltage;
-  jsonResponse["c_act_power"] = PhasePower[2].power;
-  jsonResponse["c_aprt_power"] = PhasePower[2].apparentPower;
+  jsonResponse["c_act_power"] = phasePower[2];
+  jsonResponse["c_aprt_power"] = simulateZeroPower ? 0 : PhasePower[2].apparentPower;
   jsonResponse["c_pf"] = PhasePower[2].powerFactor;
   jsonResponse["c_freq"] = PhasePower[2].frequency;
-  jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / ((float)defaultVoltage));
-  jsonResponse["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
-  jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
+  jsonResponse["total_current"] = round2((phasePower[0] + phasePower[1] + phasePower[2]) / ((float)defaultVoltage));
+  jsonResponse["total_act_power"] = phasePower[0] + phasePower[1] + phasePower[2];
+  jsonResponse["total_aprt_power"] = simulateZeroPower ? 0 : PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
 //  blinkled(ledblinkduration);
@@ -401,15 +410,50 @@ void webSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEve
 
 void mqtt_callback(char *topic, byte *payload, unsigned int length) {
   JsonDocument json;
-  deserializeJson(json, payload, length);
-  setJsonPathPower(json);
+  DeserializationError error = deserializeJson(json, payload, length);
+  if (error) {
+    DEBUG_SERIAL.print("MQTT JSON parse failed: ");
+    DEBUG_SERIAL.println(error.c_str());
+    return;
+  }
+
+  if (strcmp(topic, mqtt_topic) == 0) {
+    setJsonPathPower(json);
+  }
+  if (soc_topic[0] != '\0' && strcmp(topic, soc_topic) == 0) {
+    JsonVariant socValue;
+    if (soc_path[0] == '\0') {
+      socValue = json.as<JsonVariant>();
+    } else {
+      socValue = resolveJsonPath(json, soc_path);
+    }
+    if (!socValue.is<double>() && !socValue.is<long>() && !socValue.is<unsigned long>()) {
+      DEBUG_SERIAL.println("MQTT SOC value is missing or not numeric");
+      return;
+    }
+
+    bool wasEnabled = winterChargeMode.isEnabled();
+    if (!winterChargeMode.updateSoc(socValue.as<double>())) {
+      DEBUG_SERIAL.println("MQTT SOC value must be between 0 and 100");
+      return;
+    }
+    if (wasEnabled && !winterChargeMode.isEnabled()) {
+      preferences.putBool("winter_charge_mode", false);
+      DEBUG_SERIAL.println("SOC reached 100%; disabling winter charge mode");
+    }
+  }
 }
 
 void mqtt_reconnect() {
   DEBUG_SERIAL.print("Attempting MQTT connection...");
   if (mqtt_client.connect(shelly_name, String(mqtt_user).c_str(), String(mqtt_passwd).c_str())) {
     DEBUG_SERIAL.println("connected");
-    mqtt_client.subscribe(mqtt_topic);
+    if (mqtt_topic[0] != '\0') {
+      mqtt_client.subscribe(mqtt_topic);
+    }
+    if (soc_topic[0] != '\0' && strcmp(soc_topic, mqtt_topic) != 0) {
+      mqtt_client.subscribe(soc_topic);
+    }
   } else {
     DEBUG_SERIAL.print("failed, rc=");
     DEBUG_SERIAL.print(mqtt_client.state());
@@ -764,6 +808,8 @@ void WifiManagerSetup() {
   strcpy(shelly_mac, preferences.getString("shelly_mac", shelly_mac).c_str());
   strcpy(mqtt_port, preferences.getString("mqtt_port", mqtt_port).c_str());
   strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
+  strcpy(soc_topic, preferences.getString("soc_topic", soc_topic).c_str());
+  strcpy(soc_path, preferences.getString("soc_path", soc_path).c_str());
   strcpy(mqtt_user, preferences.getString("mqtt_user", mqtt_user).c_str());
   strcpy(mqtt_passwd, preferences.getString("mqtt_passwd", mqtt_passwd).c_str());
   strcpy(modbus_dev, preferences.getString("modbus_dev", modbus_dev).c_str());
@@ -777,6 +823,7 @@ void WifiManagerSetup() {
   strcpy(shelly_port, preferences.getString("shelly_port", shelly_port).c_str());
   strcpy(force_pwr_decimals, preferences.getString("force_pwr_decimals", force_pwr_decimals).c_str());
   strcpy(sma_id, preferences.getString("sma_id", sma_id).c_str());
+  winterChargeMode.setEnabled(preferences.getBool("winter_charge_mode", false));
   
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
   WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data", input_type, 40);
@@ -791,6 +838,8 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_sma_id("sma_id", "<b>SMA serial number</b><br>optional serial number if you have more than one SMA EM/HM in your network", sma_id, 16);
   WiFiManagerParameter custom_section2("<hr><h3>MQTT options</h3>");
   WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
+  WiFiManagerParameter custom_soc_topic("soc_topic", "<b>Battery SOC MQTT topic</b><br>Optional; leave empty to disable SOC monitoring", soc_topic, 60);
+  WiFiManagerParameter custom_soc_path("soc_path", "<b>Battery SOC JSON path</b><br>e.g. <code>Battery.SOC</code>; leave empty for a numeric JSON value", soc_path, 60);
   WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
   WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
   WiFiManagerParameter custom_section3("<hr><h3>Modbus TCP options</h3>");
@@ -825,6 +874,8 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_section2);
   wifiManager.addParameter(&custom_mqtt_port);
   wifiManager.addParameter(&custom_mqtt_topic);
+  wifiManager.addParameter(&custom_soc_topic);
+  wifiManager.addParameter(&custom_soc_path);
   wifiManager.addParameter(&custom_mqtt_user);
   wifiManager.addParameter(&custom_mqtt_passwd);
   wifiManager.addParameter(&custom_section3);
@@ -856,6 +907,8 @@ void WifiManagerSetup() {
   strcpy(led_gpio_i, custom_led_gpio_i.getValue());
   strcpy(shelly_mac, custom_shelly_mac.getValue());
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
+  strcpy(soc_topic, custom_soc_topic.getValue());
+  strcpy(soc_path, custom_soc_path.getValue());
   strcpy(mqtt_user, custom_mqtt_user.getValue());
   strcpy(mqtt_passwd, custom_mqtt_passwd.getValue());
   strcpy(modbus_dev, custom_modbus_dev.getValue());
@@ -879,6 +932,8 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tled_gpio_i : " + String(led_gpio_i));
   DEBUG_SERIAL.println("\tshelly_mac : " + String(shelly_mac));
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
+  DEBUG_SERIAL.println("\tsoc_topic : " + String(soc_topic));
+  DEBUG_SERIAL.println("\tsoc_path : " + String(soc_path));
   DEBUG_SERIAL.println("\tmqtt_user : " + String(mqtt_user));
   DEBUG_SERIAL.println("\tmqtt_passwd : " + String(mqtt_passwd));
   DEBUG_SERIAL.println("\tmodbus_dev : " + String(modbus_dev));
@@ -933,6 +988,8 @@ void WifiManagerSetup() {
     preferences.putString("led_gpio_i", led_gpio_i);
     preferences.putString("shelly_mac", shelly_mac);
     preferences.putString("mqtt_topic", mqtt_topic);
+    preferences.putString("soc_topic", soc_topic);
+    preferences.putString("soc_path", soc_path);
     preferences.putString("mqtt_user", mqtt_user);
     preferences.putString("mqtt_passwd", mqtt_passwd);
     preferences.putString("modbus_dev", modbus_dev);
@@ -970,7 +1027,35 @@ void setup(void) {
   }
 
   server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
-    request->send(200, "text/plain", "This is the Energy2Shelly for ESP converter!\r\nDevice and Energy status is available under /status\r\nTo reset configuration, goto /reset\r\n");
+    String page = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Energy2Shelly</title></head><body><h1>Energy2Shelly</h1><p>Device and energy status: <a href='/status'>/status</a></p><p>Battery SOC: ";
+    if (winterChargeMode.hasSoc()) {
+      page += String(winterChargeMode.soc(), 1) + "%";
+    } else {
+      page += "not received";
+    }
+    page += "</p><p>Winter charge mode: ";
+    page += winterChargeMode.isEnabled() ? "enabled" : "disabled";
+    page += "</p><form method='post' action='/charge-mode'><button name='enabled' value='true'>Enable winter charge mode</button> <button name='enabled' value='false'>Disable winter charge mode</button></form><p><a href='/reset'>Reconfigure device</a></p></body></html>";
+    request->send(200, "text/html", page);
+  });
+
+  server.on("/charge-mode", AsyncWebRequestMethod::HTTP_POST, [](AsyncWebServerRequest *request) {
+    if (!request->hasParam("enabled", true)) {
+      request->send(400, "text/plain", "Missing enabled parameter");
+      return;
+    }
+    String enabled = request->getParam("enabled", true)->value();
+    if (enabled != "true" && enabled != "false") {
+      request->send(400, "text/plain", "enabled must be true or false");
+      return;
+    }
+    if (enabled == "true" && (!dataMQTT || soc_topic[0] == '\0')) {
+      request->send(409, "text/plain", "Configure an SOC MQTT topic and select MQTT as the data source before enabling winter charge mode");
+      return;
+    }
+    winterChargeMode.setEnabled(enabled == "true");
+    preferences.putBool("winter_charge_mode", winterChargeMode.isEnabled());
+    request->send(200, "text/html", "Winter charge mode updated. <a href='/'>Return to status</a>");
   });
 
   server.on("/status", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {

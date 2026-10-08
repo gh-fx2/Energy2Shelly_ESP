@@ -17,6 +17,8 @@ SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
   - <code>MQTT</code>
     - Server IP, port and topic; power values on the MQTT topic are expected in JSON format. The are multiple fields to define the available values using a JSON Path-style syntax.
       You can also select between monophase and triphase power data.<br>
+
+      For winter charging with MQTT as the data source, configure an optional battery SOC MQTT topic and its JSON path (for example <code>Battery.SOC</code>). The topic payload must contain a numeric SOC from 0 to 100; leave the JSON path empty when the whole payload is a number, such as <code>85</code>. On the device home page, enable winter charge mode to report 0 W until a valid SOC of 100% is received. At 100%, the mode turns itself off and normal meter reporting resumes. If no valid SOC has arrived yet, enabled winter mode continues reporting 0 W.
       
       examples (monophase profile):
         - Total power JSON path -> <code>ENERGY.Power</code> for <code>{"ENERGY":{"Power":9.99}}</code><br>
@@ -53,6 +55,7 @@ SMA Multicast code is based on https://www.mikrocontroller.net/topic/559607
   The Shelly ID defaults to the ESP's MAC address, you may change this if you want to substitute an existing uni-meter configuration without reconnecting the battery to a new shelly device.
   
 4) Check if your device is visible in the WLAN. <code>http://IP-address</code><br>
+   Use the home page to enable or disable winter charge mode and view the latest SOC.
 5) Check the current power data at <code>http://IP-address/status</code><br>
 - [ ] \(Optional) If you want to reset you Wifi-Configuration and/or reconfigure other settings go to <code>http://IP-address/reset</code> and reconnect to the Energy2Shelly hotspot.
 
