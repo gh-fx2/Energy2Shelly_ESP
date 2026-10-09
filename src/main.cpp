@@ -37,6 +37,8 @@ char mqtt_port[6] = "1883";
 char mqtt_topic[60] = "tele/meter/SENSOR";
 char soc_topic[60] = "";
 char soc_path[60] = "";
+char battery_charge_topic[60] = "";
+char battery_charge_path[60] = "";
 char mqtt_user[40] = "";
 char mqtt_passwd[40] = "";
 char power_path[60] = "";
@@ -299,33 +301,41 @@ void GetDeviceInfo() {
 void EMGetStatus() {
   JsonDocument jsonResponse;
   last_read_milli = millis();
-  bool simulateZeroPower = winterChargeMode.shouldSimulateZeroPower();
+  const double totalPower =
+      PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
+  const double reportedTotalPower = winterChargeMode.reportedPower(totalPower);
+  const double powerScale =
+      totalPower > 0 && reportedTotalPower < totalPower
+          ? reportedTotalPower / totalPower
+          : 1;
   double phasePower[3];
   for (int i = 0; i < 3; i++) {
-    phasePower[i] = simulateZeroPower ? 0 : PhasePower[i].power;
+    phasePower[i] = PhasePower[i].power * powerScale;
   }
   jsonResponse["id"] = 0;
-  jsonResponse["a_current"] = simulateZeroPower ? 0 : PhasePower[0].current;
+  jsonResponse["a_current"] = PhasePower[0].current * powerScale;
   jsonResponse["a_voltage"] = PhasePower[0].voltage;
   jsonResponse["a_act_power"] = phasePower[0];
-  jsonResponse["a_aprt_power"] = simulateZeroPower ? 0 : PhasePower[0].apparentPower;
+  jsonResponse["a_aprt_power"] = PhasePower[0].apparentPower * powerScale;
   jsonResponse["a_pf"] = PhasePower[0].powerFactor;
   jsonResponse["a_freq"] = PhasePower[0].frequency;
-  jsonResponse["b_current"] = simulateZeroPower ? 0 : PhasePower[1].current;
+  jsonResponse["b_current"] = PhasePower[1].current * powerScale;
   jsonResponse["b_voltage"] = PhasePower[1].voltage;
   jsonResponse["b_act_power"] = phasePower[1];
-  jsonResponse["b_aprt_power"] = simulateZeroPower ? 0 : PhasePower[1].apparentPower;
+  jsonResponse["b_aprt_power"] = PhasePower[1].apparentPower * powerScale;
   jsonResponse["b_pf"] = PhasePower[1].powerFactor;
   jsonResponse["b_freq"] = PhasePower[1].frequency;
-  jsonResponse["c_current"] = simulateZeroPower ? 0 : PhasePower[2].current;
+  jsonResponse["c_current"] = PhasePower[2].current * powerScale;
   jsonResponse["c_voltage"] = PhasePower[2].voltage;
   jsonResponse["c_act_power"] = phasePower[2];
-  jsonResponse["c_aprt_power"] = simulateZeroPower ? 0 : PhasePower[2].apparentPower;
+  jsonResponse["c_aprt_power"] = PhasePower[2].apparentPower * powerScale;
   jsonResponse["c_pf"] = PhasePower[2].powerFactor;
   jsonResponse["c_freq"] = PhasePower[2].frequency;
   jsonResponse["total_current"] = round2((phasePower[0] + phasePower[1] + phasePower[2]) / ((float)defaultVoltage));
   jsonResponse["total_act_power"] = phasePower[0] + phasePower[1] + phasePower[2];
-  jsonResponse["total_aprt_power"] = simulateZeroPower ? 0 : PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
+  jsonResponse["total_aprt_power"] =
+      (PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower) *
+      powerScale;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
 //  blinkled(ledblinkduration);
@@ -429,17 +439,34 @@ void mqtt_callback(char *topic, byte *payload, unsigned int length) {
     }
     if (!socValue.is<double>() && !socValue.is<long>() && !socValue.is<unsigned long>()) {
       DEBUG_SERIAL.println("MQTT SOC value is missing or not numeric");
+    } else {
+      bool wasEnabled = winterChargeMode.isEnabled();
+      if (!winterChargeMode.updateSoc(socValue.as<double>())) {
+        DEBUG_SERIAL.println("MQTT SOC value must be between 0 and 100");
+      } else if (wasEnabled && !winterChargeMode.isEnabled()) {
+        preferences.putBool("winter_charge_mode", false);
+        DEBUG_SERIAL.println("SOC reached winter-mode threshold " +
+                             String(winterChargeMode.socThreshold(), 1) +
+                             "%; disabling winter charge mode");
+      }
+    }
+  }
+  if (battery_charge_topic[0] != '\0' &&
+      strcmp(topic, battery_charge_topic) == 0) {
+    JsonVariant batteryChargeValue;
+    if (battery_charge_path[0] == '\0') {
+      batteryChargeValue = json.as<JsonVariant>();
+    } else {
+      batteryChargeValue = resolveJsonPath(json, battery_charge_path);
+    }
+    if (!batteryChargeValue.is<double>() && !batteryChargeValue.is<long>() &&
+        !batteryChargeValue.is<unsigned long>()) {
+      DEBUG_SERIAL.println("MQTT battery charge power is missing or not numeric");
       return;
     }
-
-    bool wasEnabled = winterChargeMode.isEnabled();
-    if (!winterChargeMode.updateSoc(socValue.as<double>())) {
-      DEBUG_SERIAL.println("MQTT SOC value must be between 0 and 100");
-      return;
-    }
-    if (wasEnabled && !winterChargeMode.isEnabled()) {
-      preferences.putBool("winter_charge_mode", false);
-      DEBUG_SERIAL.println("SOC reached 100%; disabling winter charge mode");
+    if (!winterChargeMode.updateBatteryChargePower(
+            batteryChargeValue.as<double>())) {
+      DEBUG_SERIAL.println("MQTT battery charge power is not finite");
     }
   }
 }
@@ -453,6 +480,11 @@ void mqtt_reconnect() {
     }
     if (soc_topic[0] != '\0' && strcmp(soc_topic, mqtt_topic) != 0) {
       mqtt_client.subscribe(soc_topic);
+    }
+    if (battery_charge_topic[0] != '\0' &&
+        strcmp(battery_charge_topic, mqtt_topic) != 0 &&
+        strcmp(battery_charge_topic, soc_topic) != 0) {
+      mqtt_client.subscribe(battery_charge_topic);
     }
   } else {
     DEBUG_SERIAL.print("failed, rc=");
@@ -810,6 +842,20 @@ void WifiManagerSetup() {
   strcpy(mqtt_topic, preferences.getString("mqtt_topic", mqtt_topic).c_str());
   strcpy(soc_topic, preferences.getString("soc_topic", soc_topic).c_str());
   strcpy(soc_path, preferences.getString("soc_path", soc_path).c_str());
+  strcpy(battery_charge_topic, preferences.getString("bat_chg_topic", battery_charge_topic).c_str());
+  strcpy(battery_charge_path, preferences.getString("bat_chg_path", battery_charge_path).c_str());
+  String savedSocThreshold = preferences.getString("winter_soc_thr", "95");
+  char *savedSocThresholdEnd = nullptr;
+  double parsedSocThreshold =
+      strtod(savedSocThreshold.c_str(), &savedSocThresholdEnd);
+  if (savedSocThresholdEnd != savedSocThreshold.c_str() &&
+      *savedSocThresholdEnd == '\0' &&
+      !winterChargeMode.setSocThreshold(parsedSocThreshold)) {
+    DEBUG_SERIAL.println("Stored winter SOC threshold is invalid; using 95%");
+  } else if (savedSocThresholdEnd == savedSocThreshold.c_str() ||
+             *savedSocThresholdEnd != '\0') {
+    DEBUG_SERIAL.println("Stored winter SOC threshold is invalid; using 95%");
+  }
   strcpy(mqtt_user, preferences.getString("mqtt_user", mqtt_user).c_str());
   strcpy(mqtt_passwd, preferences.getString("mqtt_passwd", mqtt_passwd).c_str());
   strcpy(modbus_dev, preferences.getString("modbus_dev", modbus_dev).c_str());
@@ -821,7 +867,7 @@ void WifiManagerSetup() {
   strcpy(energy_in_path, preferences.getString("energy_in_path", energy_in_path).c_str());
   strcpy(energy_out_path, preferences.getString("energy_out_path", energy_out_path).c_str());
   strcpy(shelly_port, preferences.getString("shelly_port", shelly_port).c_str());
-  strcpy(force_pwr_decimals, preferences.getString("force_pwr_decimals", force_pwr_decimals).c_str());
+  strcpy(force_pwr_decimals, preferences.getString("forc_pwr_deci", force_pwr_decimals).c_str());
   strcpy(sma_id, preferences.getString("sma_id", sma_id).c_str());
   winterChargeMode.setEnabled(preferences.getBool("winter_charge_mode", false));
   
@@ -840,6 +886,8 @@ void WifiManagerSetup() {
   WiFiManagerParameter custom_mqtt_topic("topic", "<b>MQTT Topic</b>", mqtt_topic, 60);
   WiFiManagerParameter custom_soc_topic("soc_topic", "<b>Battery SOC MQTT topic</b><br>Optional; leave empty to disable SOC monitoring", soc_topic, 60);
   WiFiManagerParameter custom_soc_path("soc_path", "<b>Battery SOC JSON path</b><br>e.g. <code>Battery.SOC</code>; leave empty for a numeric JSON value", soc_path, 60);
+  WiFiManagerParameter custom_battery_charge_topic("battery_charge_topic", "<b>Battery charging power MQTT topic</b><br>Positive values indicate charging power in watts", battery_charge_topic, 60);
+  WiFiManagerParameter custom_battery_charge_path("battery_charge_path", "<b>Battery charging power JSON path</b><br>Leave empty when the whole payload is a number", battery_charge_path, 60);
   WiFiManagerParameter custom_mqtt_user("user", "<b>MQTT user</b><br>optional", mqtt_user, 40);
   WiFiManagerParameter custom_mqtt_passwd("passwd", "<b>MQTT password</b><br>optional", mqtt_passwd, 40);
   WiFiManagerParameter custom_section3("<hr><h3>Modbus TCP options</h3>");
@@ -876,6 +924,8 @@ void WifiManagerSetup() {
   wifiManager.addParameter(&custom_mqtt_topic);
   wifiManager.addParameter(&custom_soc_topic);
   wifiManager.addParameter(&custom_soc_path);
+  wifiManager.addParameter(&custom_battery_charge_topic);
+  wifiManager.addParameter(&custom_battery_charge_path);
   wifiManager.addParameter(&custom_mqtt_user);
   wifiManager.addParameter(&custom_mqtt_passwd);
   wifiManager.addParameter(&custom_section3);
@@ -909,6 +959,8 @@ void WifiManagerSetup() {
   strcpy(mqtt_topic, custom_mqtt_topic.getValue());
   strcpy(soc_topic, custom_soc_topic.getValue());
   strcpy(soc_path, custom_soc_path.getValue());
+  strcpy(battery_charge_topic, custom_battery_charge_topic.getValue());
+  strcpy(battery_charge_path, custom_battery_charge_path.getValue());
   strcpy(mqtt_user, custom_mqtt_user.getValue());
   strcpy(mqtt_passwd, custom_mqtt_passwd.getValue());
   strcpy(modbus_dev, custom_modbus_dev.getValue());
@@ -934,6 +986,8 @@ void WifiManagerSetup() {
   DEBUG_SERIAL.println("\tmqtt_topic : " + String(mqtt_topic));
   DEBUG_SERIAL.println("\tsoc_topic : " + String(soc_topic));
   DEBUG_SERIAL.println("\tsoc_path : " + String(soc_path));
+  DEBUG_SERIAL.println("\tbattery_charge_topic : " + String(battery_charge_topic));
+  DEBUG_SERIAL.println("\tbattery_charge_path : " + String(battery_charge_path));
   DEBUG_SERIAL.println("\tmqtt_user : " + String(mqtt_user));
   DEBUG_SERIAL.println("\tmqtt_passwd : " + String(mqtt_passwd));
   DEBUG_SERIAL.println("\tmodbus_dev : " + String(modbus_dev));
@@ -990,6 +1044,8 @@ void WifiManagerSetup() {
     preferences.putString("mqtt_topic", mqtt_topic);
     preferences.putString("soc_topic", soc_topic);
     preferences.putString("soc_path", soc_path);
+    preferences.putString("bat_chg_topic", battery_charge_topic);
+    preferences.putString("bat_chg_path", battery_charge_path);
     preferences.putString("mqtt_user", mqtt_user);
     preferences.putString("mqtt_passwd", mqtt_passwd);
     preferences.putString("modbus_dev", modbus_dev);
@@ -1001,7 +1057,7 @@ void WifiManagerSetup() {
     preferences.putString("energy_in_path", energy_in_path);
     preferences.putString("energy_out_path", energy_out_path);
     preferences.putString("shelly_port", shelly_port);
-    preferences.putString("force_pwr_decimals", force_pwr_decimals);
+    preferences.putString("forc_pwr_deci", force_pwr_decimals);
     preferences.putString("sma_id", sma_id);
     wifiManager.reboot();
   }
@@ -1033,9 +1089,20 @@ void setup(void) {
     } else {
       page += "not received";
     }
+    page += "</br>Battery charging power: ";
+    if (winterChargeMode.hasBatteryChargePower()) {
+      page += String(winterChargeMode.batteryChargePower(), 1) + " W";
+    } else {
+      page += "not received";
+    }
+    page += "</br>last reported Power: ";
+    page += String(winterChargeMode.lastReportedPower(), 1) + " W";
+  
     page += "</p><p>Winter charge mode: ";
     page += winterChargeMode.isEnabled() ? "enabled" : "disabled";
-    page += "</p><form method='post' action='/charge-mode'><button name='enabled' value='true'>Enable winter charge mode</button> <button name='enabled' value='false'>Disable winter charge mode</button></form><p><a href='/reset'>Reconfigure device</a></p></body></html>";
+    page += "</p><form method='post' action='/charge-mode'><label for='soc_threshold'>Disable winter mode at SOC (%):</label> <input id='soc_threshold' name='soc_threshold' type='number' min='0' max='100' step='any' value='";
+    page += String(winterChargeMode.socThreshold(), 1);
+    page += "' required><br><button name='enabled' value='true'>Enable winter charge mode</button> <button name='enabled' value='false'>Disable winter charge mode</button></form><p><a href='/reset'>Reconfigure device</a></p></body></html>";
     request->send(200, "text/html", page);
   });
 
@@ -1049,13 +1116,31 @@ void setup(void) {
       request->send(400, "text/plain", "enabled must be true or false");
       return;
     }
-    if (enabled == "true" && (!dataMQTT || soc_topic[0] == '\0')) {
-      request->send(409, "text/plain", "Configure an SOC MQTT topic and select MQTT as the data source before enabling winter charge mode");
+    if (!request->hasParam("soc_threshold", true)) {
+      request->send(400, "text/plain", "Missing SOC threshold");
       return;
     }
+    String thresholdValue = request->getParam("soc_threshold", true)->value();
+    char *end = nullptr;
+    double socThreshold = strtod(thresholdValue.c_str(), &end);
+    if (end == thresholdValue.c_str() || *end != '\0' ||
+        !std::isfinite(socThreshold) || socThreshold < 0 ||
+        socThreshold > 100) {
+      request->send(400, "text/plain", "SOC threshold must be a number between 0 and 100");
+      return;
+    }
+    if (enabled == "true" &&
+        (!dataMQTT || soc_topic[0] == '\0' ||
+         battery_charge_topic[0] == '\0')) {
+      request->send(409, "text/plain", "Configure SOC and battery charging power MQTT topics and select MQTT as the data source before enabling winter charge mode");
+      return;
+    }
+    winterChargeMode.setSocThreshold(socThreshold);
     winterChargeMode.setEnabled(enabled == "true");
+    preferences.putString("winter_soc_thr",
+                          String(winterChargeMode.socThreshold(), 2).c_str());
     preferences.putBool("winter_charge_mode", winterChargeMode.isEnabled());
-    request->send(200, "text/html", "Winter charge mode updated. <a href='/'>Return to status</a>");
+    request->send(200, "text/html", "Winter charge mode and SOC threshold updated. <a href='/'>Return to status</a>");
   });
 
   server.on("/status", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
