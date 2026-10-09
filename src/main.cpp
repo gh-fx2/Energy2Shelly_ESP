@@ -163,6 +163,7 @@ static uint32_t last_read_milli = 0;
 static uint32_t last_hichi_milli = 0;
 
 void setPowerData(double totalPower) {
+  totalPower = winterChargeMode.reportedPower(totalPower);
   last_hichi_milli = millis();
   for (int i = 0; i <= 2; i++) {
     PhasePower[i].power = round2(totalPower * 0.3333);
@@ -301,41 +302,28 @@ void GetDeviceInfo() {
 void EMGetStatus() {
   JsonDocument jsonResponse;
   last_read_milli = millis();
-  const double totalPower =
-      PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
-  const double reportedTotalPower = winterChargeMode.reportedPower(totalPower);
-  const double powerScale =
-      totalPower > 0 && reportedTotalPower < totalPower
-          ? reportedTotalPower / totalPower
-          : 1;
-  double phasePower[3];
-  for (int i = 0; i < 3; i++) {
-    phasePower[i] = PhasePower[i].power * powerScale;
-  }
   jsonResponse["id"] = 0;
-  jsonResponse["a_current"] = PhasePower[0].current * powerScale;
+  jsonResponse["a_current"] = PhasePower[0].current;
   jsonResponse["a_voltage"] = PhasePower[0].voltage;
-  jsonResponse["a_act_power"] = phasePower[0];
-  jsonResponse["a_aprt_power"] = PhasePower[0].apparentPower * powerScale;
+  jsonResponse["a_act_power"] = PhasePower[0].power;
+  jsonResponse["a_aprt_power"] = PhasePower[0].apparentPower;
   jsonResponse["a_pf"] = PhasePower[0].powerFactor;
   jsonResponse["a_freq"] = PhasePower[0].frequency;
-  jsonResponse["b_current"] = PhasePower[1].current * powerScale;
+  jsonResponse["b_current"] = PhasePower[1].current;
   jsonResponse["b_voltage"] = PhasePower[1].voltage;
-  jsonResponse["b_act_power"] = phasePower[1];
-  jsonResponse["b_aprt_power"] = PhasePower[1].apparentPower * powerScale;
+  jsonResponse["b_act_power"] = PhasePower[1].power;
+  jsonResponse["b_aprt_power"] = PhasePower[1].apparentPower;
   jsonResponse["b_pf"] = PhasePower[1].powerFactor;
   jsonResponse["b_freq"] = PhasePower[1].frequency;
-  jsonResponse["c_current"] = PhasePower[2].current * powerScale;
+  jsonResponse["c_current"] = PhasePower[2].current;
   jsonResponse["c_voltage"] = PhasePower[2].voltage;
-  jsonResponse["c_act_power"] = phasePower[2];
-  jsonResponse["c_aprt_power"] = PhasePower[2].apparentPower * powerScale;
+  jsonResponse["c_act_power"] = PhasePower[2].power;
+  jsonResponse["c_aprt_power"] = PhasePower[2].apparentPower;
   jsonResponse["c_pf"] = PhasePower[2].powerFactor;
   jsonResponse["c_freq"] = PhasePower[2].frequency;
-  jsonResponse["total_current"] = round2((phasePower[0] + phasePower[1] + phasePower[2]) / ((float)defaultVoltage));
-  jsonResponse["total_act_power"] = phasePower[0] + phasePower[1] + phasePower[2];
-  jsonResponse["total_aprt_power"] =
-      (PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower) *
-      powerScale;
+  jsonResponse["total_current"] = round2((PhasePower[0].power + PhasePower[1].power + PhasePower[2].power) / ((float)defaultVoltage));
+  jsonResponse["total_act_power"] = PhasePower[0].power + PhasePower[1].power + PhasePower[2].power;
+  jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
 //  blinkled(ledblinkduration);
