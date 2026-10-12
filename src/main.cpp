@@ -298,7 +298,7 @@ void GetDeviceInfo() {
   jsonResponse["profile"] = "triphase";
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-//  blinkled(ledblinkduration);
+  blinkled(ledblinkduration);
 }
 
 void EMGetStatus() {
@@ -328,7 +328,7 @@ void EMGetStatus() {
   jsonResponse["total_aprt_power"] = PhasePower[0].apparentPower + PhasePower[1].apparentPower + PhasePower[2].apparentPower;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-//  blinkled(ledblinkduration);
+  blinkled(ledblinkduration);
 }
 
 void EMDataGetStatus() {
@@ -344,7 +344,7 @@ void EMDataGetStatus() {
   jsonResponse["total_act_ret"] = PhaseEnergy[0].gridfeedin + PhaseEnergy[1].gridfeedin + PhaseEnergy[2].gridfeedin;
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-//  blinkled(ledblinkduration);
+  blinkled(ledblinkduration);
 }
 
 void EMGetConfig() {
@@ -357,7 +357,7 @@ void EMGetConfig() {
   jsonResponse["ct_type"] = "120A";
   serializeJson(jsonResponse, serJsonResponse);
   DEBUG_SERIAL.println(serJsonResponse);
-//  blinkled(ledblinkduration);
+  blinkled(ledblinkduration);
 }
 
 void webSocketEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -1073,22 +1073,25 @@ void setup(void) {
   }
 
   server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
-    String page = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Energy2Shelly</title></head><body><h1>Energy2Shelly</h1><p>Device and energy status: <a href='/status'>/status</a></p><p>Battery SOC: ";
+    String page = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Energy2Shelly</title></head><body><h1>Energy2Shelly</h1><p>Device and energy status: <a href='/status'>/status</a></p>";
+    page += "<p>uptimre : " + String(millis() / 1000) + " s</p>";
+    page += "<p>Battery SOC: ";
     if (winterChargeMode.hasSoc()) {
       page += String(winterChargeMode.soc(), 1) + "%";
     } else {
       page += "not received";
     }
-    page += "</br>Battery charging power: ";
     if (winterChargeMode.hasBatteryChargePower()) {
-      page += String(winterChargeMode.batteryChargePower(), 1) + " W";
-    } else {
-      page += "not received";
-    }
+      double batteryChargePower = winterChargeMode.batteryChargePower();
+      if ( batteryChargePower > 0)
+        page += "</br><span style='color:red'>Battery discharging power: " + String(batteryChargePower,0) + " W</span>";
+      else
+        page += "</br><span style='color:green'>Battery charging power: " + String(-batteryChargePower,0) + " W</span>";
+    } 
     page += "</br>last received Power: ";
-    page += String(last_received_power, 1) + " W";
+    page += String(last_received_power, 0) + " W";
     page += "</br>last reported Power: ";
-    page += String(winterChargeMode.lastReportedPower(), 1) + " W";
+    page += String(winterChargeMode.lastReportedPower(), 0) + " W";
   
     page += "</p><p>Winter charge mode: ";
     page += winterChargeMode.isEnabled() ? "enabled" : "disabled";
@@ -1308,13 +1311,14 @@ void loop() {
   if( last_hichi_milli )
   {
     if ( millis() - last_hichi_milli > 5000 )
-       blinkled(ledblinkduration);
-    if ( millis() - last_hichi_milli > 10000 )
+       blinkled(1000);
+    if ( millis() - last_hichi_milli > 60000 )
     {
       ESP.restart();
       delay(20);
     }
   }
+  #if 0
   if ( last_read_milli )
   {
     if ( millis() - last_read_milli > 60000 )
@@ -1323,5 +1327,6 @@ void loop() {
       delay(20);
     }
   }
+  #endif
   handleblinkled();
 }
