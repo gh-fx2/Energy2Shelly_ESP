@@ -1074,7 +1074,7 @@ void setup(void) {
 
   server.on("/", AsyncWebRequestMethod::HTTP_GET, [](AsyncWebServerRequest *request) {
     String page = "<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'><title>Energy2Shelly</title></head><body><h1>Energy2Shelly</h1><p>Device and energy status: <a href='/status'>/status</a></p>";
-    page += "<p>uptimre : " + String(millis() / 1000) + " s</p>";
+    page += "<p>uptime : " + String(millis() / 1000) + " s</p>";
     page += "<p>Battery SOC: ";
     if (winterChargeMode.hasSoc()) {
       page += String(winterChargeMode.soc(), 1) + "%";
