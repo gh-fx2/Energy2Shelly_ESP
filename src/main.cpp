@@ -114,6 +114,7 @@ PowerData PhasePower[3];
 EnergyData PhaseEnergy[3];
 WinterChargeMode winterChargeMode;
 String serJsonResponse;
+double last_received_power = 0;
 
 #ifndef ESP32
   MDNSResponder::hMDNSService hMDNSService = 0; // handle of the http service in the MDNS responder
@@ -163,6 +164,7 @@ static uint32_t last_read_milli = 0;
 static uint32_t last_hichi_milli = 0;
 
 void setPowerData(double totalPower) {
+  last_received_power = totalPower;
   totalPower = winterChargeMode.reportedPower(totalPower);
   last_hichi_milli = millis();
   for (int i = 0; i <= 2; i++) {
@@ -432,7 +434,7 @@ void mqtt_callback(char *topic, byte *payload, unsigned int length) {
       if (!winterChargeMode.updateSoc(socValue.as<double>())) {
         DEBUG_SERIAL.println("MQTT SOC value must be between 0 and 100");
       } else if (wasEnabled && !winterChargeMode.isEnabled()) {
-        preferences.putBool("winter_charge_mode", false);
+        preferences.putBool("winter_charge", false);
         DEBUG_SERIAL.println("SOC reached winter-mode threshold " +
                              String(winterChargeMode.socThreshold(), 1) +
                              "%; disabling winter charge mode");
@@ -857,7 +859,7 @@ void WifiManagerSetup() {
   strcpy(shelly_port, preferences.getString("shelly_port", shelly_port).c_str());
   strcpy(force_pwr_decimals, preferences.getString("forc_pwr_deci", force_pwr_decimals).c_str());
   strcpy(sma_id, preferences.getString("sma_id", sma_id).c_str());
-  winterChargeMode.setEnabled(preferences.getBool("winter_charge_mode", false));
+  winterChargeMode.setEnabled(preferences.getBool("winter_charge", false));
   
   WiFiManagerParameter custom_section1("<h3>General settings</h3>");
   WiFiManagerParameter custom_input_type("type", "<b>Data source</b><br><code>MQTT</code> for MQTT<br><code>HTTP</code> for generic HTTP<br><code>SMA</code> for SMA EM/HM multicast<br><code>SHRDZM</code> for SHRDZM UDP data<br><code>SUNSPEC</code> for Modbus TCP SUNSPEC data", input_type, 40);
@@ -1083,6 +1085,8 @@ void setup(void) {
     } else {
       page += "not received";
     }
+    page += "</br>last received Power: ";
+    page += String(last_received_power, 1) + " W";
     page += "</br>last reported Power: ";
     page += String(winterChargeMode.lastReportedPower(), 1) + " W";
   
@@ -1127,7 +1131,7 @@ void setup(void) {
     winterChargeMode.setEnabled(enabled == "true");
     preferences.putString("winter_soc_thr",
                           String(winterChargeMode.socThreshold(), 2).c_str());
-    preferences.putBool("winter_charge_mode", winterChargeMode.isEnabled());
+    preferences.putBool("winter_charge", winterChargeMode.isEnabled());
     request->send(200, "text/html", "Winter charge mode and SOC threshold updated. <a href='/'>Return to status</a>");
   });
 
