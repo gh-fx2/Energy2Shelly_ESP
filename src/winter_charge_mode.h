@@ -82,8 +82,8 @@ class WinterChargeMode {
 
   double reportedPower(double netPower) {
     double value = netPower;
-    double charge = battery_charge_power_ >= 0 ? battery_charge_power_ : 0;
-    double discharge = battery_charge_power_ < 0 ? -battery_charge_power_ : 0;
+    double charge = battery_charge_power_ < 0 ? -battery_charge_power_ : 0;
+    double discharge = battery_charge_power_ < 0 ? battery_charge_power_ : 0;
     
     if (isActive() && ( value > charge ))
     {
