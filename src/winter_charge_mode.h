@@ -95,7 +95,7 @@ class WinterChargeMode {
     }
     else if ( isActive() && ( discharge > 5 ) )
     {
-      value -= discharge;
+      value = -discharge;
     }
 
     last_reported_power_ = value;
